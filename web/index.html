@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Counter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Ticket Counter</h1>
+    <div class="container">
+        <label for="from">From:</label>
+        <select id="from">
+            <option>Bangalore</option>
+            <option>Chennai</option>
+            <option>Delhi</option>
+        </select>
+        
+        <label for="to">To:</label>
+        <select id="to">
+            <option>Bangalore</option>
+            <option>Chennai</option>
+            <option>Delhi</option>
+        </select>
+        
+        <label for="date">Date:</label>
+        <input type="date" id="date">
+        
+        <button onclick="showBookingForm()">Enter</button>
+    </div>
+    
+    <div class="container" id="bookingForm" style="display: none;">
+        <input type="text" id="name" placeholder="Enter Name">
+        <input type="text" id="phone" placeholder="Enter Phone Number">
+        <button onclick="bookTicket()">Book</button>
+    </div>
+
+    <script>
+        function showBookingForm() {
+            document.getElementById("bookingForm").style.display = "block";
+        }
+
+        function bookTicket() {
+            let data = {
+                name: document.getElementById("name").value,
+                phone: document.getElementById("phone").value,
+                from: document.getElementById("from").value,
+                to: document.getElementById("to").value,
+                date: document.getElementById("date").value
+            };
+
+            fetch("/book", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            }).then(response => response.json())
+              .then(data => alert(data.message || data.error));
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+/* Dark Mode Styling */
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #0d0d0d; /* Deeper black */
+    color: #e0e0e0; /* Soft white for contrast */
+    text-align: center;
+    padding: 20px;
+}
+
+/* Centered Container */
+.container {
+    max-width: 400px;
+    margin: auto;
+    background: #1a1a1a; /* Dark gray for depth */
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.1); /* Soft glow */
+    transition: 0.3s ease-in-out;
+}
+
+/* Inputs & Select Dropdown */
+select, input, button {
+    width: 100%;
+    padding: 12px;
+    margin: 12px 0;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    transition: 0.3s ease-in-out;
+}
+
+select, input {
+    background: #252525; /* Slightly lighter than container */
+    color: #ffffff;
+    box-shadow: inset 0 0 5px rgba(255, 255, 255, 0.1); /* Subtle depth */
+}
+
+/* Buttons */
+button {
+    background-color: #ff4500; /* Vibrant Orange */
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+    text-transform: uppercase;
+    box-shadow: 0 4px 10px rgba(255, 69, 0, 0.3); /* Glowing effect */
+}
+
+button:hover {
+    background-color: #ff5722; /* Slightly lighter orange */
+    box-shadow: 0 4px 15px rgba(255, 69, 0, 0.5); /* Stronger glow */
+    transform: scale(1.05); /* Subtle zoom */
+}
+
+/* Add Smooth Transitions */
+.container:hover {
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
