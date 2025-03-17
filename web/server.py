@@ -30,6 +30,9 @@ def book_ticket():
         data = request.json
         conn = sqlite3.connect('bookings.db')
         c = conn.cursor()
+        if not data['name'] or not data['phone'] or not data['from'] or not data['to'] or not data['date']:
+         return jsonify({"error": "Missing required fields"}), 400
+     
         c.execute("INSERT INTO tickets (name, phone, from_city, to_city, date) VALUES (?, ?, ?, ?, ?)", 
                   (data['name'], data['phone'], data['from'], data['to'], data['date']))
         conn.commit()

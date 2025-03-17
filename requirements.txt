@@ -1,2 +1,9 @@
 flask 
 pandas
+langchain 
+langchain_community
+# openai 
+# selenium 
+# playwright
+python-dotenv
+langchain-huggingface
