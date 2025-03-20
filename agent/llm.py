@@ -1,11 +1,10 @@
-from typing import TypedDict, Optional
+from typing import Optional
 import os
-import json
-from dotenv import load_dotenv
-from langchain_core.prompts import PromptTemplate
-from langchain_huggingface import HuggingFaceEndpoint
-from huggingface_hub import InferenceClient
 import sys
+from dotenv import load_dotenv
+from huggingface_hub import InferenceClient
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from web.api import MyTravels
@@ -15,86 +14,91 @@ from tests import print_table
 load_dotenv()
 
 # Define a structured dictionary type for ticket details
-class TicketDetails(TypedDict, total=False):
-    name: str
-    phone: str
-    from_: str  # "from" is a keyword in Python, so use "from_" instead
-    to: str
-    date: str
+class TicketDetails(BaseModel):
+    name: Optional[str] = Field(None, description="Name of the person")
+    phone: Optional[str] = Field(None, description="Mobile number of the person")
+    from_: Optional[str] = Field(None, description="Name of a city")  # "from" is a keyword in Python, so use "from_" instead
+    to: Optional[str] = Field(None, description="Name of a city")
+    date: Optional[str] = Field(None, description="A date on the calendar")
+    reply: Optional[str] = Field(None, description="If any details are missing, return a message asking for the missing fields.")
 
 class TicketAI:
     def __init__(self):
         self.hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        self.endpoint_url = "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct"
         self.client = InferenceClient(token=self.hf_api_key)
+        self.chat_history = []  # Store chat history
+        self.parser = PydanticOutputParser(pydantic_object=TicketDetails)
+
+        # Adjusted prompt for structured output
+        # self.prompt_template = (
+        #     "Extract the following details from the input and return a strictly valid JSON object:\n"
+        #     "name, phone, from (source), to (destination), and date.\n\n"
+        #     "If any details are missing, return a field called 'reply' with a message listing the missing details.\n"
+        #     "Use the exact format as defined:\n"
+        #     "{format_instruction}\n\n"
+        #     "Chat History:\n{chat_history}\n\n"
+        #     "Latest Input:\n{user_input}\n\n"
+        # ) 
         
-        # Adjusted prompt with chat history
-        self.prompt_template = PromptTemplate.from_template(
-            "Remember that do not assume any information on your own always ask for required information explicitly."
-            "Do not return blank messages,request only the missing information."
-            "extract structured booking details from the latest user input and conversation history.\n\n"
+        self.prompt_template = (
+            "Extract the following details from the input and return \n"
+            "name, phone, from (source), to (destination), and date.\n\n"
+            "If any details are missing, return a field called 'reply' with a message listing the missing details.\n"
+            "Use the exact format as defined:\n"
+            "{format_instruction}\n\n"
             "Chat History:\n{chat_history}\n\n"
             "Latest Input:\n{user_input}\n\n"
-            "Respond in a structured format with keys: name, phone, from, to, date. "
-            "If any details are missing, request only the missing information."
-            
-        )
-        
-        self.llm = HuggingFaceEndpoint(
-            endpoint_url=self.endpoint_url,
-            huggingfacehub_api_token=self.hf_api_key
-        )
-        
-        self.llm_chain = self.prompt_template | self.llm
-        self.chat_history = []  # Store chat history
-        self.chat_history.clear()
-
-    def parse_ticket_details(self, response: str) -> TicketDetails:
-        """Parses LLM output and ensures it matches the TicketDetails format."""
-        try:
-            parsed_data = json.loads(response)
-            return TicketDetails(
-                name=parsed_data.get("name", ""),
-                phone=parsed_data.get("phone", ""),
-                from_=parsed_data.get("from", ""),
-                to=parsed_data.get("to", ""),
-                date=parsed_data.get("date", "")
-            )
-        except json.JSONDecodeError:
-            print("LLM response is not valid JSON. Retrying...")
-            return TicketDetails()
+        ) 
 
     def call_agent(self, user_input):
-        extracted_data: TicketDetails = {}
+        extracted_data = {}
 
         while True:
             self.chat_history.append(f"User: {user_input}")
             chat_history_str = "\n".join(self.chat_history)
 
-            response = self.llm_chain.invoke({"chat_history": chat_history_str, "user_input": user_input})
-            self.chat_history.append(f"AI: {json.dumps(response)}")
-            parsed_data = self.parse_ticket_details(response)
+            formatted_prompt = self.prompt_template.format(
+                format_instruction=self.parser.get_format_instructions(),
+                chat_history=chat_history_str,
+                user_input=user_input
+            )
+
+            response = self.client.chat_completion(
+                model="mistralai/Mistral-7B-Instruct-v0.1",
+                messages=[{"role": "user", "content": formatted_prompt}]
+            )
+
+            # Extract and parse response using LangChain's Pydantic parser
+            try:
+                ai_response = response.choices[0]["message"]["content"]
+                parsed_data = self.parser.parse(ai_response)  # **Correct way to parse output**
+            except Exception as e:
+                print(f"Invalid output: {response}\nError: {e}")
+                continue
 
             
-            extracted_data.update(parsed_data)
+            self.chat_history.append(f"AI: {parsed_data.model_dump_json()}")
+            extracted_data.update(parsed_data.model_dump())
 
-            # Check for missing fields
+           
+            # Ensure all required fields are present before proceeding
             missing_fields = [key for key in ["name", "phone", "from_", "to", "date"] if not extracted_data.get(key)]
 
             if missing_fields:
-                print("\nUpdated Booking Details:", extracted_data)
-                print(f"Provide me the following information {', '.join(missing_fields)}")
-                # for field in missing_fields:
-                #     extracted_data[field] = input(f"Please provide {field}: ").strip()
-                user_input=input(f"Please provide: ").strip()
-                # print("\nUpdated Booking Details:", extracted_data)
-            else:
+                extracted_data["reply"] = f"Provide the following missing details: {', '.join(missing_fields)}"
+                print("AI:")
+                print(extracted_data["reply"])
+                user_input = input("Enter missing details: ").strip()
+                continue
+
+
+            # Ensure all required fields are present before booking
+            if all(extracted_data.get(key) for key in ["name", "phone", "from_", "to", "date"]):
                 print("\nLet me book a ticket for you...")
                 self.buy_ticket(extracted_data, show_table=True)
                 break  
-             
 
-    def buy_ticket(self, details: TicketDetails, show_table=False):
+    def buy_ticket(self, details, show_table=False):
         """Books the ticket once details are extracted."""
         travel_agent = MyTravels()
         result = travel_agent.book_ticket(
@@ -107,7 +111,6 @@ class TicketAI:
         if show_table:
             print_table()
         return result
-
 
 if __name__ == "__main__":
     agent = TicketAI()
