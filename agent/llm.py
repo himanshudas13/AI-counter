@@ -1,11 +1,12 @@
 from typing import Optional
 import os
 import sys
+import re
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import RunnableBranch
 from pydantic import BaseModel, Field
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from web.api import MyTravels
 from tests import print_table
@@ -13,106 +14,115 @@ from tests import print_table
 # Load environment variables
 load_dotenv()
 
-# Define a structured dictionary type for ticket details
+class UserIntent(BaseModel):
+    task: str = Field(..., description="User intent (bookticket, checkprice, checkavailability, other)")
+
 class TicketDetails(BaseModel):
-    name: Optional[str] = Field(None, description="Name of the person")
-    phone: Optional[str] = Field(None, description="Mobile number of the person")
-    from_: Optional[str] = Field(None, description="Name of a city")  # "from" is a keyword in Python, so use "from_" instead
-    to: Optional[str] = Field(None, description="Name of a city")
-    date: Optional[str] = Field(None, description="A date on the calendar")
-    reply: Optional[str] = Field(None, description="If any details are missing, return a message asking for the missing fields.")
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    from_: Optional[str] = None
+    to: Optional[str] = None
+    date: Optional[str] = None
+    reply: Optional[str] = None
 
 class TicketAI:
     def __init__(self):
-        self.hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        self.client = InferenceClient(token=self.hf_api_key)
-        self.chat_history = []  # Store chat history
-        self.parser = PydanticOutputParser(pydantic_object=TicketDetails)
-
-        # Adjusted prompt for structured output
-        # self.prompt_template = (
-        #     "Extract the following details from the input and return a strictly valid JSON object:\n"
-        #     "name, phone, from (source), to (destination), and date.\n\n"
-        #     "If any details are missing, return a field called 'reply' with a message listing the missing details.\n"
-        #     "Use the exact format as defined:\n"
-        #     "{format_instruction}\n\n"
-        #     "Chat History:\n{chat_history}\n\n"
-        #     "Latest Input:\n{user_input}\n\n"
-        # ) 
+        self.client = InferenceClient(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+        self.model = "google/gemma-7b-it"
+        self.intent_parser = PydanticOutputParser(pydantic_object=UserIntent)
+        self.details_parser = PydanticOutputParser(pydantic_object=TicketDetails)
+        self.ticket_data = {key: None for key in ["name", "phone", "from", "to", "date"]}
         
-        self.prompt_template = (
-            "Extract the following details from the input and return \n"
-            "name, phone, from (source), to (destination), and date.\n\n"
-            "If any details are missing, return a field called 'reply' with a message listing the missing details.\n"
-            "Use the exact format as defined:\n"
-            "{format_instruction}\n\n"
-            "Chat History:\n{chat_history}\n\n"
-            "Latest Input:\n{user_input}\n\n"
-        ) 
+        # Define prompts
+        self.intent_prompt = """
+        Determine the user's intent. Choose one of the following tasks:
+        - book_ticket
+        - check_price
+        - check_availability
+        - other
+
+        User Input: {user_input}
+        {format_instruction}
+        """
+        
+        self.details_prompt = """
+        Extract ticket details: name, phone, from, to, and date.
+        If any details are missing, return a 'reply' field asking for them.
+        
+        User Input: {user_input}
+        {format_instruction}
+        """
+        
+        self.fallback_prompt = """
+        {user_input}
+        Best train routes, travel tips, station amenities—discuss anything train-related!
+        Be creative and funny in 2 lines.
+        """
+        
+        self.price_prompt = """
+        Retrieve ticket price information for the given journey.
+        
+        User Input: {user_input}
+        """
+        
+        self.availability_prompt = """
+        Check ticket availability for the given journey.
+        
+        User Input: {user_input}
+        """
+
+    def query_model(self, prompt):
+        response = self.client.chat_completion(model=self.model, messages=[{"role": "user", "content": prompt}])
+        return response.choices[0]["message"]["content"]
+
+    def detect_intent(self, user_input):
+        prompt = self.intent_prompt.format(user_input=user_input, format_instruction=self.intent_parser.get_format_instructions())
+        try:
+            return re.sub(r'[^a-z]', '', self.intent_parser.parse(self.query_model(prompt)).task.lower())
+        except:
+            return "other"
+
+    def handle_booking(self,task):
+        prompt = self.details_prompt.format(user_input=self.user_input, format_instruction=self.details_parser.get_format_instructions())
+        try:
+            details = self.details_parser.parse(self.query_model(prompt))
+            self.ticket_data.update({k: v for k, v in details.dict().items() if v})
+            if all(self.ticket_data.values()):
+                self.book_ticket()
+            else:
+                print(f"Missing details: {details.reply}")
+                self.call_agent(input("Provide missing details: "))
+        except:
+            self.call_agent(input("How can I help you further? "))
+
+    def book_ticket(self):
+        MyTravels().book_ticket(**self.ticket_data)
+        print_table()
+        print("Booking confirmed! Ticket details saved.")
+
+    def check_price(self,task):
+        prompt = self.price_prompt.format(user_input=self.user_input)
+        print("Ticket price info:", self.query_model(prompt))
+
+    def check_availability(self,task):
+        prompt = self.availability_prompt.format(user_input=self.user_input)
+        print("Ticket availability info:", self.query_model(prompt))
+
+    def fallback(self,task):
+        prompt = self.fallback_prompt.format(user_input=self.user_input)
+        print(self.query_model(prompt))
+        self.call_agent(input("How else can I assist? "))
 
     def call_agent(self, user_input):
-        extracted_data = {}
-
-        while True:
-            self.chat_history.append(f"User: {user_input}")
-            chat_history_str = "\n".join(self.chat_history)
-
-            formatted_prompt = self.prompt_template.format(
-                format_instruction=self.parser.get_format_instructions(),
-                chat_history=chat_history_str,
-                user_input=user_input
-            )
-
-            response = self.client.chat_completion(
-                model="mistralai/Mistral-7B-Instruct-v0.1",
-                messages=[{"role": "user", "content": formatted_prompt}]
-            )
-
-            # Extract and parse response using LangChain's Pydantic parser
-            try:
-                ai_response = response.choices[0]["message"]["content"]
-                parsed_data = self.parser.parse(ai_response)  # **Correct way to parse output**
-            except Exception as e:
-                print(f"Invalid output: {response}\nError: {e}")
-                continue
-
-            
-            self.chat_history.append(f"AI: {parsed_data.model_dump_json()}")
-            extracted_data.update(parsed_data.model_dump())
-
-           
-            # Ensure all required fields are present before proceeding
-            missing_fields = [key for key in ["name", "phone", "from_", "to", "date"] if not extracted_data.get(key)]
-
-            if missing_fields:
-                extracted_data["reply"] = f"Provide the following missing details: {', '.join(missing_fields)}"
-                print("AI:")
-                print(extracted_data["reply"])
-                user_input = input("Enter missing details: ").strip()
-                continue
-
-
-            # Ensure all required fields are present before booking
-            if all(extracted_data.get(key) for key in ["name", "phone", "from_", "to", "date"]):
-                print("\nLet me book a ticket for you...")
-                self.buy_ticket(extracted_data, show_table=True)
-                break  
-
-    def buy_ticket(self, details, show_table=False):
-        """Books the ticket once details are extracted."""
-        travel_agent = MyTravels()
-        result = travel_agent.book_ticket(
-            name=details["name"],
-            phone=details["phone"],
-            source=details["from_"],  # Using "from_" since "from" is a keyword
-            destination=details["to"],
-            date=details["date"]
-        )
-        if show_table:
-            print_table()
-        return result
+        self.user_input = user_input
+        task = self.detect_intent(user_input)
+        print(task)
+        RunnableBranch(
+            (lambda x: x == "bookticket", self.handle_booking),
+            (lambda x: x == "checkprice", self.check_price),
+            (lambda x: x == "checkavailability", self.check_availability),
+            self.fallback,
+        ).invoke(task)
 
 if __name__ == "__main__":
-    agent = TicketAI()
-    user_input = input("How can I help you today? ")
-    agent.call_agent(user_input)
+    TicketAI().call_agent(input("How can I help you today? "))
