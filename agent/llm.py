@@ -1,12 +1,13 @@
 from typing import Optional
 import os
 import sys
-import re
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import RunnableBranch
 from pydantic import BaseModel, Field
+import re
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from web.api import MyTravels
 from tests import print_table
@@ -14,115 +15,146 @@ from tests import print_table
 # Load environment variables
 load_dotenv()
 
-class UserIntent(BaseModel):
-    task: str = Field(..., description="User intent (bookticket, checkprice, checkavailability, other)")
+# Define Pydantic models for structured output
+class Intent(BaseModel):
+    book_ticket: bool = Field(False, description="User wants to book a ticket")
+    check_price: bool = Field(False, description="User wants to check ticket prices")
+    check_availability: bool = Field(False, description="User wants to check seat availability")
 
 class TicketDetails(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    from_: Optional[str] = None
-    to: Optional[str] = None
-    date: Optional[str] = None
-    reply: Optional[str] = None
+    name: Optional[str] = Field(None, description="Name of the person")
+    phone: Optional[str] = Field(None, description="Mobile number of the person")
+    from_: Optional[str] = Field(None, description="Name of a city")
+    to: Optional[str] = Field(None, description="Name of a city")
+    date: Optional[str] = Field(None, description="A date on the calendar")
+    reply: Optional[str] = Field(None, description="If any of the details are missing, return a message asking for them else say thank you.")
 
 class TicketAI:
     def __init__(self):
-        self.client = InferenceClient(token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-        self.model = "google/gemma-7b-it"
-        self.intent_parser = PydanticOutputParser(pydantic_object=UserIntent)
+        self.hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        self.client = InferenceClient(token=self.hf_api_key)
+        self.user_input = None
+        self.intent_parser = PydanticOutputParser(pydantic_object=Intent)
         self.details_parser = PydanticOutputParser(pydantic_object=TicketDetails)
-        self.ticket_data = {key: None for key in ["name", "phone", "from", "to", "date"]}
-        
-        # Define prompts
-        self.intent_prompt = """
-        Determine the user's intent. Choose one of the following tasks:
-        - book_ticket
-        - check_price
-        - check_availability
-        - other
 
-        User Input: {user_input}
-        {format_instruction}
-        """
-        
-        self.details_prompt = """
-        Extract ticket details: name, phone, from, to, and date.
-        If any details are missing, return a 'reply' field asking for them.
-        
-        User Input: {user_input}
-        {format_instruction}
-        """
-        
-        self.fallback_prompt = """
-        {user_input}
-        Best train routes, travel tips, station amenities—discuss anything train-related!
-        Be creative and funny in 2 lines.
-        """
-        
-        self.price_prompt = """
-        Retrieve ticket price information for the given journey.
-        
-        User Input: {user_input}
-        """
-        
-        self.availability_prompt = """
-        Check ticket availability for the given journey.
-        
-        User Input: {user_input}
-        """
+        self.intent_prompt = (
+            "Determine the user's intent. Respond with a valid JSON object strictly following this format:\n"
+            "```json\n"
+            "{format_instruction}\n"
+            "```\n\n"
+            "User Input: {user_input}\n\n"
+            "Only return a properly formatted JSON object without any extra text."
+        )
 
-    def query_model(self, prompt):
-        response = self.client.chat_completion(model=self.model, messages=[{"role": "user", "content": prompt}])
-        return response.choices[0]["message"]["content"]
+
+        self.details_prompt = (
+            "Extract ticket details: name, phone, from (source), to (destination), and date.\n"
+            "If details are missing, return a field called 'reply' listing the missing details.\n"
+            "Strictly return a JSON object matching this format:\n"
+            "```json\n"
+            "{format_instruction}\n"
+            "```\n\n"
+            "User Input: {user_input}\n"
+            "Do not add any extra text before or after the JSON object."
+        )
+
+
+        self.fallback_prompt = (
+            "User Input: {user_input}\n"
+            "Keep me interested in traveling through trains in India.\n"
+            "Some topics we can discuss:\n"
+            "- Best train routes\n"
+            "- Travel tips for train journeys\n"
+            "- Railway station amenities and services\n\n"
+            "Be creative and funny in just 2 lines.\n"
+        )
+
+        self.ticket_data = { "name": None, "phone": None, "from": None, "to": None, "date": None }
+
+    def update_ticket(self, name, phone, from_, to, date):
+        if name: self.ticket_data["name"] = name
+        if phone: self.ticket_data["phone"] = phone
+        if from_: self.ticket_data["from"] = from_
+        if to: self.ticket_data["to"] = to
+        if date: self.ticket_data["date"] = date
+        return all(self.ticket_data.values())
 
     def detect_intent(self, user_input):
-        prompt = self.intent_prompt.format(user_input=user_input, format_instruction=self.intent_parser.get_format_instructions())
-        try:
-            return re.sub(r'[^a-z]', '', self.intent_parser.parse(self.query_model(prompt)).task.lower())
-        except:
-            return "other"
+        formatted_prompt = self.intent_prompt.format(
+            user_input=user_input, format_instruction=self.intent_parser.get_format_instructions()
+        )
+        response = self.client.chat_completion(
+            model="mistralai/Mistral-7B-Instruct-v0.1", messages=[{"role": "user", "content": formatted_prompt}]
+        )
+        return self.intent_parser.parse(response.choices[0]["message"]["content"])
 
-    def handle_booking(self,task):
-        prompt = self.details_prompt.format(user_input=self.user_input, format_instruction=self.details_parser.get_format_instructions())
+    def handle_booking(self, *_):
+        print("Booking ticket...")
+        formatted_prompt = self.details_prompt.format(
+            user_input=self.user_input, format_instruction=self.details_parser.get_format_instructions()
+        )
+        response = self.client.chat_completion(
+            model="mistralai/Mistral-7B-Instruct-v0.1", messages=[{"role": "user", "content": formatted_prompt}]
+        )
         try:
-            details = self.details_parser.parse(self.query_model(prompt))
-            self.ticket_data.update({k: v for k, v in details.dict().items() if v})
-            if all(self.ticket_data.values()):
+            details = self.details_parser.parse(response.choices[0]["message"]["content"])
+            complete = self.update_ticket(details.name, details.phone, details.from_, details.to, details.date)
+
+            print("Extracted Ticket Details:", self.ticket_data)
+            if complete:
                 self.book_ticket()
+            elif details.reply:
+                print(f"Missing Details: {details.reply}")
+                self.call_agent(input("Please provide the missing details: "))
             else:
-                print(f"Missing details: {details.reply}")
-                self.call_agent(input("Provide missing details: "))
-        except:
-            self.call_agent(input("How can I help you further? "))
+                print("Incomplete details. Please provide all required information.")
+                self.call_agent(input("Please provide the missing details: "))
+        except Exception as e:
+            print(f"Error processing booking: {e}")
+
 
     def book_ticket(self):
-        MyTravels().book_ticket(**self.ticket_data)
+        travel_agent = MyTravels()
+        travel_agent.book_ticket(
+            name=self.ticket_data["name"], phone=self.ticket_data["phone"],
+            source=self.ticket_data["from"], destination=self.ticket_data["to"], date=self.ticket_data["date"]
+        )
         print_table()
         print("Booking confirmed! Ticket details saved.")
 
-    def check_price(self,task):
-        prompt = self.price_prompt.format(user_input=self.user_input)
-        print("Ticket price info:", self.query_model(prompt))
+    def check_price(self):
+        print("Checking ticket prices... (Functionality not yet implemented)")
 
-    def check_availability(self,task):
-        prompt = self.availability_prompt.format(user_input=self.user_input)
-        print("Ticket availability info:", self.query_model(prompt))
+    def check_availability(self):
+        print("Checking ticket availability... (Functionality not yet implemented)")
 
-    def fallback(self,task):
-        prompt = self.fallback_prompt.format(user_input=self.user_input)
-        print(self.query_model(prompt))
-        self.call_agent(input("How else can I assist? "))
+    def fallback(self):
+        print("Fallback to general conversation...")
+        formatted_prompt = self.fallback_prompt.format(user_input=self.user_input)
+        response = self.client.chat_completion(
+            model="mistralai/Mistral-7B-Instruct-v0.1", messages=[{"role": "user", "content": formatted_prompt}]
+        )
+        try:
+            print(response.choices[0]["message"]["content"])
+        except Exception as e:
+            print(f"Error parsing fallback response: {e}")
+        self.call_agent(input("How else can I assist you with your train travel? "))
 
     def call_agent(self, user_input):
         self.user_input = user_input
-        task = self.detect_intent(user_input)
-        print(task)
-        RunnableBranch(
-            (lambda x: x == "bookticket", self.handle_booking),
-            (lambda x: x == "checkprice", self.check_price),
-            (lambda x: x == "checkavailability", self.check_availability),
+        intent = self.detect_intent(user_input)
+        print(f"Detected intent: {intent}")
+
+        # Branch execution based on boolean flags
+        branch = RunnableBranch(
+            (lambda _: intent.book_ticket, self.handle_booking),
+            (lambda _: intent.check_price, self.check_price),
+            (lambda _: intent.check_availability, self.check_availability),
             self.fallback,
-        ).invoke(task)
+        )
+        branch.invoke(None)
 
 if __name__ == "__main__":
-    TicketAI().call_agent(input("How can I help you today? "))
+    agent = TicketAI()
+    user_input = input("How can I help you today? ")
+    agent.call_agent(user_input)
