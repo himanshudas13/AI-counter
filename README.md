@@ -40,7 +40,7 @@ TicketAI Setup Instructions
 ---------------------------
 
 1. Clone the repository:
-   git clone https://github.com/your-username/your-repo-name.git
+   git clone https://github.com/himanshudas13/AI-counter.git
    cd your-repo-name
 
 2. (Optional) Create and activate a virtual environment:
