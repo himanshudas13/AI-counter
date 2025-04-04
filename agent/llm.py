@@ -11,64 +11,29 @@ import re
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from web.api import MyTravels
 from tests import print_table
-
+from  agent.output_formats import TicketDetails, Intent
+from agent.prompts import (
+    intent_prompt,details_prompt,fallback_prompt
+)
 # Load environment variables
 load_dotenv()
 
-# Define Pydantic models for structured output
-class Intent(BaseModel):
-    book_ticket: bool = Field(False, description="User wants to book a ticket")
-    check_price: bool = Field(False, description="User wants to check ticket prices")
-    check_availability: bool = Field(False, description="User wants to check seat availability")
-
-class TicketDetails(BaseModel):
-    name: Optional[str] = Field(None, description="Name of the person")
-    phone: Optional[str] = Field(None, description="Mobile number of the person")
-    from_: Optional[str] = Field(None, description="Name of a city")
-    to: Optional[str] = Field(None, description="Name of a city")
-    date: Optional[str] = Field(None, description="A date on the calendar")
-    reply: Optional[str] = Field(None, description="If any of the details are missing, return a message asking for them else say thank you.")
 
 class TicketAI:
     def __init__(self):
+        
         self.hf_api_key = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         self.client = InferenceClient(token=self.hf_api_key)
         self.user_input = None
         self.intent_parser = PydanticOutputParser(pydantic_object=Intent)
         self.details_parser = PydanticOutputParser(pydantic_object=TicketDetails)
 
-        self.intent_prompt = (
-            "Determine the user's intent. Respond with a valid JSON object strictly following this format:\n"
-            "```json\n"
-            "{format_instruction}\n"
-            "```\n\n"
-            "User Input: {user_input}\n\n"
-            "Only return a properly formatted JSON object without any extra text."
-        )
-
-
-        self.details_prompt = (
-            "Extract ticket details: name, phone, from (source), to (destination), and date.\n"
-            "If details are missing, return a field called 'reply' listing the missing details.\n"
-            "Strictly return a JSON object matching this format:\n"
-            "```json\n"
-            "{format_instruction}\n"
-            "```\n\n"
-            "User Input: {user_input}\n"
-            "Do not add any extra text before or after the JSON object."
-        )
-
-
-        self.fallback_prompt = (
-            "User Input: {user_input}\n"
-            "Keep me interested in traveling through trains in India.\n"
-            "Some topics we can discuss:\n"
-            "- Best train routes\n"
-            "- Travel tips for train journeys\n"
-            "- Railway station amenities and services\n\n"
-            "Be creative and funny in just 2 lines.\n"
-        )
-
+       
+        self.intent_prompt= intent_prompt
+        self.details_prompt= details_prompt
+        self.fallback_prompt= fallback_prompt
+        
+        
         self.ticket_data = { "name": None, "phone": None, "from": None, "to": None, "date": None }
 
     def update_ticket(self, name, phone, from_, to, date):
@@ -86,7 +51,12 @@ class TicketAI:
         response = self.client.chat_completion(
             model="mistralai/Mistral-7B-Instruct-v0.1", messages=[{"role": "user", "content": formatted_prompt}]
         )
-        return self.intent_parser.parse(response.choices[0]["message"]["content"])
+        
+        raw_text = response.choices[0]["message"]["content"]
+        cleaned_text = raw_text.replace("\\_", "_").strip()
+
+        return self.intent_parser.parse(cleaned_text)
+        # return self.intent_parser.parse(response.choices[0]["message"]["content"])
 
     def handle_booking(self, *_):
         print("Booking ticket...")
@@ -102,33 +72,39 @@ class TicketAI:
 
             print("Extracted Ticket Details:", self.ticket_data)
             if complete:
-                self.book_ticket()
+                a=self.book_ticket()
+                return f"{a['message']} Ticket ID: {a['ticket_id']}"
             elif details.reply:
                 print(f"Missing Details: {details.reply}")
                 self.call_agent(input("Please provide the missing details: "))
             else:
                 print("Incomplete details. Please provide all required information.")
                 self.call_agent(input("Please provide the missing details: "))
+                
+                
         except Exception as e:
             print(f"Error processing booking: {e}")
 
 
     def book_ticket(self):
         travel_agent = MyTravels()
-        travel_agent.book_ticket(
+        a=travel_agent.book_ticket(
             name=self.ticket_data["name"], phone=self.ticket_data["phone"],
             source=self.ticket_data["from"], destination=self.ticket_data["to"], date=self.ticket_data["date"]
         )
-        print_table()
+        # print_table()
         print("Booking confirmed! Ticket details saved.")
+        return a
 
-    def check_price(self):
+    def check_price(self, *_):
         print("Checking ticket prices... (Functionality not yet implemented)")
+        return "Checking ticket prices... (Functionality not yet implemented)"
 
-    def check_availability(self):
+    def check_availability(self, *_):
         print("Checking ticket availability... (Functionality not yet implemented)")
+        return "Checking ticket availability... (Functionality not yet implemented)"
 
-    def fallback(self):
+    def fallback(self, *_):
         print("Fallback to general conversation...")
         formatted_prompt = self.fallback_prompt.format(user_input=self.user_input)
         response = self.client.chat_completion(
@@ -136,9 +112,12 @@ class TicketAI:
         )
         try:
             print(response.choices[0]["message"]["content"])
+            return response.choices[0]["message"]["content"]
         except Exception as e:
             print(f"Error parsing fallback response: {e}")
-        self.call_agent(input("How else can I assist you with your train travel? "))
+            
+        return "How else can I assist you with your train travel?"
+
 
     def call_agent(self, user_input):
         self.user_input = user_input
@@ -152,9 +131,12 @@ class TicketAI:
             (lambda _: intent.check_availability, self.check_availability),
             self.fallback,
         )
-        branch.invoke(None)
+        output= branch.invoke(None)
+        return output
 
 if __name__ == "__main__":
     agent = TicketAI()
     user_input = input("How can I help you today? ")
     agent.call_agent(user_input)
+
+

@@ -5,12 +5,33 @@ body {
     color: #e0e0e0; /* Soft white for contrast */
     text-align: center;
     padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Main Wrapper */
+.wrapper {
+    display: flex;
+    width: 100%;
+    max-width: 1200px;
+    justify-content: center;
+    align-items: flex-start;
+    position: relative;
+}
+
+/* Main Content */
+.main-content {
+    flex-grow: 1;
+    padding: 20px;
+    max-width: 600px;
+    transition: margin-right 0.3s;
 }
 
 /* Centered Container */
 .container {
     max-width: 400px;
-    margin: auto;
+    margin: 20px auto;
     background: #1a1a1a; /* Dark gray for depth */
     padding: 20px;
     border-radius: 10px;
@@ -54,4 +75,52 @@ button:hover {
 /* Add Smooth Transitions */
 .container:hover {
     box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+/* Sidebar Styling */
+.sidebar {
+    width: 0;
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100%;
+    background: #1a1a1a;
+    overflow-x: hidden;
+    transition: 0.3s;
+    padding-top: 60px;
+    box-shadow: -5px 0 10px rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-content {
+    padding: 15px;
+    color: #e0e0e0;
+}
+
+/* Sidebar Chat Button */
+#openSidebar {
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    background: #ff4500;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    cursor: pointer;
+    border-radius: 5px;
+    font-size: 14px;  /* Ensures small size */
+    width: auto; /* Prevents stretching */
+    min-width: 50px;
+}
+
+#openSidebar:hover {
+    background: #ff5722;
+}
+
+/* Adjust Content when Sidebar is Open */
+.sidebar-open .main-content {
+    margin-right: 300px;
+}
+
+.sidebar-open .sidebar {
+    width: 300px;
 }

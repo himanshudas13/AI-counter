@@ -7,39 +7,66 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Ticket Counter</h1>
-    <div class="container">
-        <label for="from">From:</label>
-        <select id="from">
-            <option>Bangalore</option>
-            <option>Chennai</option>
-            <option>Delhi</option>
-        </select>
-        
-        <label for="to">To:</label>
-        <select id="to">
-            <option>Bangalore</option>
-            <option>Chennai</option>
-            <option>Delhi</option>
-        </select>
-        
-        <label for="date">Date:</label>
-        <input type="date" id="date">
-        
-        <button onclick="showBookingForm()">Enter</button>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <h1>Ticket Counter</h1>
+        <div class="container">
+            <label for="from">From:</label>
+            <select id="from">
+                <option>Bangalore</option>
+                <option>Chennai</option>
+                <option>Delhi</option>
+            </select>
+
+            <label for="to">To:</label>
+            <select id="to">
+                <option>Bangalore</option>
+                <option>Chennai</option>
+                <option>Delhi</option>
+            </select>
+
+            <label for="date">Date:</label>
+            <input type="date" id="date">
+
+            <button onclick="showBookingForm()">Enter</button>
+        </div>
+
+        <div class="container" id="bookingForm" style="display: none;">
+            <input type="text" id="name" placeholder="Enter Name">
+            <input type="text" id="phone" placeholder="Enter Phone Number">
+            <button onclick="bookTicket()">Book</button>
+        </div>
     </div>
-    
-    <div class="container" id="bookingForm" style="display: none;">
-        <input type="text" id="name" placeholder="Enter Name">
-        <input type="text" id="phone" placeholder="Enter Phone Number">
-        <button onclick="bookTicket()">Book</button>
+
+    <!-- Chat Button -->
+    <button id="openSidebar" onclick="toggleSidebar()">Chat</button>
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="sidebar">
+        <div class="sidebar-content">
+            <h2>Chat with AI 🤖</h2>
+            <p>Ask us anything!</p>
+
+            <!-- Chat Box -->
+            <div id="chat-box">
+                <div id="chat-messages"></div>
+                <input type="text" id="chat-input" placeholder="Type a message...">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+
+            <!-- Close Sidebar Button -->
+            <button onclick="toggleSidebar()">Close</button>
+        </div>
     </div>
 
     <script>
+        // Show Booking Form
         function showBookingForm() {
             document.getElementById("bookingForm").style.display = "block";
         }
 
+        // Book Ticket Function
         function bookTicket() {
             let data = {
                 name: document.getElementById("name").value,
@@ -53,9 +80,64 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data)
-            }).then(response => response.json())
-              .then(data => alert(data.message || data.error));
+            })
+            .then(response => response.json())
+            .then(data => alert(data.message || data.error));
         }
+
+        // Toggle Sidebar
+        function toggleSidebar() {
+            let sidebar = document.getElementById("sidebar");
+            let mainContent = document.querySelector(".main-content");
+
+            if (sidebar.style.width === "300px") {
+                sidebar.style.width = "0";  // Close sidebar
+                mainContent.style.marginRight = "0";
+            } else {
+                sidebar.style.width = "300px";  // Open sidebar
+                mainContent.style.marginRight = "300px";
+            }
+        }
+
+        // Chatbot Functionality (Basic)
+        // Chatbot Functionality (Basic)
+        function sendMessage() {
+            let inputField = document.getElementById("chat-input");
+            let message = inputField.value.trim();
+            if (message === "") return;
+
+            // Display user message in chat
+            let chatBox = document.getElementById("chat-messages");
+            chatBox.innerHTML += `<div class="message user-message"><strong>User:</strong> ${message}</div>`;
+             
+            // Send user input to backend
+            fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: message })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Display AI response in chat
+                chatBox.innerHTML += `<div class="message ai-message"><strong>AI:</strong> ${data.response}</div>`;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            })
+            .catch(error => console.error("Error:", error));
+
+            inputField.value = "";
+        }
+
+        
+
+    // Enable sending on Enter key press
+         document.getElementById("chat-input").addEventListener("keypress", function(event) {
+         if (event.key === "Enter") {
+            event.preventDefault(); // Prevents form submission (if any)
+            sendMessage();
+        }
+    });
+
     </script>
+
 </body>
 </html>

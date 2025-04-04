@@ -1,32 +1,29 @@
-import requests
 import os
+import sqlite3
 from dotenv import load_dotenv
+import pandas as pd
 
 class MyTravels:
     def __init__(self):
-        """Initialize API URL from environment variables"""
         load_dotenv()
-        
 
     def book_ticket(self, name, phone, source, destination, date):
-        """Send a booking request to the API"""
-        self.booking_url = os.getenv("BOOKING_API_URL")
-        payload = {
-            "name": name,
-            "phone": phone,
-            "from": source,
-            "to": destination,
-            "date": date
-        }
+        try:
+            with sqlite3.connect("bookings.db", check_same_thread=False) as conn:
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO tickets (name, phone, from_city, to_city, date)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (name, phone, source, destination, date))
+                ticket_id = c.lastrowid
+                conn.commit()
+                df = pd.read_sql_query(f"SELECT * FROM tickets", conn)
+                print(df)
 
-        response = requests.post(self.booking_url, json=payload)
-
-        if response.status_code == 200:
-            try:
-                return {"status": "success", "response": response.json()}
-            except requests.exceptions.JSONDecodeError:
-                return {"status": "error", "message": "Empty response from server"}
-        else:
-            return {"status": "error", "code": response.status_code, "message": response.text}
-
-
+            return {
+                "status": "success",
+                "message": f"Ticket booked successfully from {source} to {destination} on {date}!",
+                "ticket_id": ticket_id
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
